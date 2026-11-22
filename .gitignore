@@ -1,0 +1,29 @@
+# Build and test output
+target/
+out/
+*.class
+
+# LexQ's full contract manifest, wherever a copy is placed. It holds more than this
+# repository publishes, and contracts/lexq-manifest.sdk.json will be generated from it.
+lexq-manifest.json
+
+# Environment files. .env.example stays tracked.
+.env
+.env.*
+!.env.example
+
+# IDE / editors
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local notes and settings
+CLAUDE.local.md
+.claude/settings.local.json

@@ -1,226 +1,34 @@
 # Client contract
 
-This repository builds `io.lexq:lexq-sdk`, the Java client for the [LexQ](https://lexq.io)
-execution API. Kotlin and Scala code uses the same client. A backend service sends facts,
-such as an order's amount and the customer's tier, and LexQ evaluates the deployed rules
-and returns the decision. This library makes that call. It does not evaluate rules itself.
+`io.lexq:lexq-sdk` follows v0.1.0 of the LexQ SDK specification. The specification's
+version numbers are separate from this library's. [spec/SPEC.md](spec/SPEC.md) is an
+unchanged copy of that version and says what the client must do when it calls LexQ.
+This file lists where the client does not yet do what that version says, and it maps the
+specification onto Java.
 
-The library starts with one endpoint, `POST /api/v1/execution/groups/{groupId}`.
-Batch and composite execution are not in it yet. Managing rules belongs to the
-[LexQ CLI](https://github.com/lexq-io/lexq-cli) and its MCP server. The endpoint is
-described in the [Execution API reference](https://docs.lexq.io/api/execution), and
-its failures in [error codes](https://docs.lexq.io/api/errors).
+## Not followed yet
 
-## Resilience Contract
+The client has no code yet, so it does none of what the specification says.
+[Language mapping](#language-mapping) says how it will follow the specification. Once it
+has code, it will still fall short in one place:
 
-A call to LexQ crosses the network, so it can be slow or fail. What the caller should
-do then depends on the decision: a checkout can go ahead without a discount, but a
-transfer should wait. This library exists for the four safeguards below, and every
-release keeps all four.
+- **Where the client starts** ([Sending a request](spec/SPEC.md#sending-a-request)): the
+  client recognizes a mobile app only by `java.vm.name`, which is `Dalvik` on Android. In
+  a mobile app or a web page whose Java runtime reports another name, the client starts.
 
-### 1. Give every call a deadline
+## Language mapping
 
-The default is finite. The client sets it, a call can override it, and neither can
-turn it off. The deadline covers every attempt and every wait between attempts. Each
-attempt also has its own timeout, cut to the time left before the deadline, so an
-attempt that hangs leaves time for another. An attempt's timeout covers the whole
-response, up to its last byte. A timeout set with `HttpRequest.Builder.timeout()` in the
-JDK's HTTP client can stop counting once the headers arrive, so it cannot serve as the
-attempt timeout on its own.
-
-### 2. Retry with the same `Idempotency-Key` and the same bytes
-
-When an attempt fails, send it again with the same key. If the caller passes no key,
-generate one per call and use it for every attempt of that call. Serialize the body
-once and resend those bytes: the same key with a different body fails with `I-001`,
-and a body serialized a second time can differ. Retries are on by default. The client
-or a single call can turn them off.
-
-| What came back | Retry |
+| What the specification leaves to each SDK | The Java client |
 |---|---|
-| Nothing: the attempt timed out or the connection failed | Yes, with backoff, while the deadline allows |
-| `502`, `503`, or `504` | Yes, with backoff, while the deadline allows |
-| `429` | Yes, after `Retry-After` if the response has one, or else after a longer wait, while the deadline allows. A request rejected with `429` did not use its key |
-| `409` with `I-002` | Yes, with backoff, while the deadline allows. A request with this key is still running or failed less than a minute ago |
-| `409` with `I-001` | Never. The key is spent, and only a new key works |
-| `403` with `B-008` | Never. The monthly execution quota is used up, and every new execution fails the same way until it resets or the plan is upgraded |
-| Anything else | No |
-
-If this library adds batch execution, it must never retry a batch automatically.
-Batch calls take no `Idempotency-Key`, so a retried batch runs and bills every item
-again.
-
-### 3. Keep a circuit breaker on by default
-
-The breaker counts calls, not attempts. A call adds one when it ends with the fallback
-because the deadline ran out, or because its last attempt timed out, failed to connect,
-or got a 5xx. Any other call that got a response resets the count to zero. A call that
-sent nothing, because the breaker was open or the call failed before sending, leaves the
-count alone. So does a call that its caller cancelled, as described under Errors, even
-when an earlier attempt got a response.
-
-When the count reaches the threshold, the breaker opens: calls skip the network and go
-straight to the fallback. After a cool-down, one trial call goes through with its
-retries, while other calls keep getting the fallback. If the trial adds to the count,
-the breaker opens again. If its caller cancels it, or it fails before sending, the next
-call becomes the trial. Otherwise the breaker closes. The breaker belongs to the client
-instance, so a service creates one client and shares it, and the client is safe to call
-from many threads at once. The client can turn the breaker off.
-
-### 4. Require a fallback on every call, and use it on every failure
-
-The library never picks a decision for the caller, because only the caller knows which
-side is safe. LexQ errors that are not retried use the fallback too. A rule change that
-needs a new fact, or a policy group someone disabled to stop bad decisions, must not
-take the caller's service down. The fallback is a parameter of every call: a function
-that receives the error and returns the caller's own value. If it throws, the call
-throws that exception, and an asynchronous call's future completes exceptionally with
-it. The deadline covers the attempts to reach LexQ, not the fallback. The result is
-either LexQ's decision or the fallback's value with the error, and it says which.
-
-### Errors
-
-Two kinds of mistake skip the fallback, because they are bugs in the calling code. One
-is leaving out the fallback. It is a parameter of the call, so a call without one fails
-to compile in Java, Kotlin, and Scala, and passing `null` in its place throws
-`NullPointerException`. The other is an argument the client cannot use, such as a `null`
-API key, which throws `NullPointerException`, or a deadline of zero, which throws
-`IllegalArgumentException`. The client throws these exceptions before anything is sent,
-from the constructor or from the call, and an asynchronous call throws them instead of
-returning a future. The second kind does not include the contents of the facts or the
-contexts, or the text of an idempotency key: when the client cannot send those, the
-call uses the fallback, as described below.
-
-A call that its caller cancels skips the fallback as well: a call whose waiting thread is
-interrupted, or an asynchronous call whose future is cancelled. The client stops the
-attempt in flight and does not run the fallback, because nothing is waiting for its
-value. An interrupted call leaves the thread's interrupt status set and throws
-`CancellationException`, as `join()` on a cancelled future does.
-
-Everything else uses the fallback, including two failures that happen before anything
-is sent. One is something in the facts or the contexts that the client will not write:
-a value that JSON cannot carry as written, such as `NaN`, `Infinity`, or a map with a
-key that is not a string; a value nested deeper than the client's limit; a number with
-more digits than LexQ accepts; or a collection that is not a `List`, such as a `Set` or
-the `values()` of a map. The client counts a number's digits before writing it, because
-without an exponent `1E+10000000` is 10,000,001 characters long. The `Set` and
-`Collection` interfaces promise no order: `Set.of` and the `values()` of `Map.of` can
-iterate in a different order each time the JVM starts, so a repeat with the same key
-could send a different body. The other failure is an idempotency key that is empty or
-that a header cannot carry. For both, the fallback receives a `LexqException` whose
-reason says the request was not sent.
-
-The error the fallback receives is always a `LexqException`, an unchecked exception. Its
-reason names what happened: an open breaker; the deadline; an attempt that timed out; a
-failed connection; a LexQ error or a response the client could not use, with its status
-and any `errorCode`; or a request the client did not send. The exception also lists
-every attempt and carries the idempotency key the call used. When LexQ finished the
-call's decision and it succeeded, repeating the call with that key within 24 hours
-returns the decision instead of running a second one.
-
-### Contract tests
-
-Each safeguard must have a contract test that CI runs on every pull request. The tests
-are the specification: a change to a safeguard changes its test in the same pull
-request, and the description says why. The fallback test runs the JDK's compiler on a
-call without a fallback and fails if that call compiles. Thresholds, waits, and default
-values belong in the code next to their tests, not in this file.
-
-## Wire Contract
-
-### Reading a response
-
-- Read the body for every status. LexQ reports failures in the body, for 5xx as well
-  as 4xx. The JDK's HTTP client does not throw on an error status, and a replacement
-  HTTP client must not either. Spring's `RestClient`, for one, throws by default.
-- Never follow a redirect. The JDK's HTTP client follows none by default, but one built
-  to follow them, such as with `Redirect.NORMAL`, sends the request's headers,
-  `x-api-key` included, to the new address, even on another host, and after a `307` or
-  `308` it sends the body too. A `3xx` is a failure that keeps its status.
-- A body that is not JSON is a failure that keeps its status. A load balancer's 502
-  page or the 404 from a wrong host is HTML.
-- Read at most a fixed number of bytes. A larger body is a failure that keeps its
-  status, even when it carries a decision, so one response cannot fill the caller's
-  memory.
-- A LexQ response has two branches. `result: "SUCCESS"` carries `data`, and
-  `result: "ERROR"` carries `errorCode` and `message`. The key is `errorCode`, not
-  `code`, and reading the wrong key fails silently: every error arrives without a
-  code.
-- A 2xx whose `result` is not `SUCCESS`, or a 4xx or 5xx whose `result` is `SUCCESS`,
-  is a server defect. Treat it as a failure even if it carries `data`.
-- Branch on `errorCode` as well as the status. `I-001` and `I-002` are both `409` and
-  need opposite handling. Codes are stable, and messages may be reworded.
-
-### Returning a decision
-
-- Return every field LexQ sends in `data`. Besides the facts and `traceId`, that is
-  `executedAt`, `totalProcessingTimeMs`, `inputContexts`, `executionTraces`, and
-  `decisionTraces`. A field LexQ adds later reaches the caller too, through a map of
-  every field in `data`, before the library's types name it. When they do, the type of a
-  field added later accepts `null`, so it is never a primitive such as `long` or
-  `boolean`, and the client accepts the field when it is empty: a retry that LexQ serves
-  from the idempotency key can return a decision made before the field existed, with
-  the field `null`, `0`, or `false`. A test reads the single-group response the
-  Execution API reference shows and fails when one of its fields is missing from the
-  result.
-- Return the final facts as well as the three layers LexQ sends. `inputFacts` holds
-  the facts as LexQ received them, `mutatedFacts` the facts a rule changed, and
-  `generatedVariables` the keys the request did not send, such as a `SET_FACT` target.
-  The final facts are `inputFacts` with `mutatedFacts` laid over it and then
-  `generatedVariables`, so where two layers have the same key, the later layer wins.
-- Make a block hard to miss. A `BLOCK` action does not fail the call. It sets
-  `isBlocked` to `true`. The key arrives in `generatedVariables` when the request did
-  not send `isBlocked`, and in `mutatedFacts` when the request sent another value. If
-  the request already sent `true`, only `inputFacts` has it. The result for LexQ's
-  decision has a top-level `isBlocked` that is `true` when the final facts have
-  `isBlocked: true`, and `false` otherwise. A request that sends `isBlocked: true` gets
-  `true` back even when no `BLOCK` ran, so the documentation must say to send an
-  earlier block under another key, such as `previouslyBlocked`. A fallback's value has
-  no such field.
-- Return `data.traceId`. It is the execution's audit handle, and the caller stores it
-  with the record the decision applies to. A retry that LexQ served from the
-  idempotency key returns the original `traceId` and `executedAt`.
-- Keep every number exact in both directions. LexQ calculates in decimal, and an
-  amount can carry 34 significant digits or more. A `double` holds 15 reliably, and
-  the library cannot tell an amount from a count. Parse responses so that no number
-  loses digits, and give callers a way to send an exact amount as a JSON number. A
-  string such as `"150000"` is not one: a fact whose type is NUMBER rejects it with
-  `P-060`. Every number in the facts, the contexts, and the traces reaches the caller
-  as a `BigDecimal` with the digits and the scale LexQ wrote, so `1.50` stays `1.50`.
-  The same amount can arrive with different scales, such as `20` and `20.0`, and
-  `equals` is false between them, as is `==` in Kotlin and Scala, so the documentation
-  must say to compare numbers with `compareTo`. `totalProcessingTimeMs` is a `long`,
-  because it counts milliseconds. A caller sends an exact amount as a `BigDecimal` or a
-  `BigInteger`, and a `BigDecimal` from one decision goes back out unchanged. A
-  `double` or a `float` becomes the decimal that `Double.toString` or `Float.toString`
-  writes, without trailing zeros after the decimal point. So `0.1` goes out as `0.1`,
-  not as the 55 decimal places of `new BigDecimal(0.1)`, and `0.0001`, which
-  `Double.toString` writes as `1.0E-4`, goes out as `0.0001`, not `0.00010`. The client
-  sends every number without an exponent, as `toPlainString()` writes it, so a number
-  LexQ wrote as `0.0000001` goes back out the same way, not as the `1E-7` that
-  `toString()` writes. For the same reason, the documentation must say to print numbers
-  with `toPlainString()`. A contract test sends and reads back an amount with more than
-  34 significant digits.
-
-### Sending a request
-
-- Keep the API key on the server. Send it in the `x-api-key` header, never in
-  `Authorization`. The constructor throws on Android, where `java.vm.name` is `Dalvik`,
-  because the key would ship to every user who installs the app. A desktop app hands
-  the key to its users the same way, but its JVM looks like a server's, so the
-  documentation must say to keep the client out of desktop apps. The constructor
-  accepts an `http` base URL only for `localhost`, `127.0.0.1`, and `[::1]`.
-- Send `null` as JSON `null` and keep its key, at every level of `facts` and
-  `contexts`. LexQ treats a key sent as `null` differently from a key left out. A
-  condition on a `null` value does not match, even in a rule that blocks. If an enabled
-  rule reads a key that the request leaves out of `facts`, the request fails with
-  `P-015`, which names the key, before any rule runs.
-- Never shorten a caller's idempotency key. LexQ accepts up to 255 characters and
-  answers a longer key with `I-003` rather than cutting it. Keys are stored with the
-  execution, so tell callers to hash long IDs and keep personal data out of them.
-- Send `trafficKey` in `contexts`. A/B routing reads `contexts.trafficKey`. In `facts`
-  it is ignored, and the test version receives no traffic. The library does not move
-  it, so the documentation for `contexts` must say where it goes. LexQ stores the whole
-  `contexts` object with the execution, so the documentation must also say to keep
-  personal data out of it and to make `trafficKey` a surrogate key or a keyed hash, never
-  an email address or a phone number.
+| The shape of a call | Each call has a blocking form and an asynchronous form, and both take the fallback as a parameter. The blocking form returns a result that holds either LexQ's decision or the fallback's value with the error. The asynchronous form returns a `CompletableFuture` of that result. If the fallback throws, the blocking form throws that exception, and the asynchronous form's future completes exceptionally with it. |
+| The error type, and how a programming error is reported | The fallback receives a `LexqException`, an unchecked exception. A programming error makes the constructor or the call throw before anything is sent: `NullPointerException` for a `null` argument, the fallback included, and `IllegalArgumentException` for an argument out of range, such as a deadline that is not positive or a group ID that the specification or this file rules out. The asynchronous form throws these instead of returning a future. A call without a fallback does not compile in Java, Kotlin, or Scala, and a test runs the JDK's compiler on such a call and fails if the call compiles. Where the client refuses to start, the constructor throws an `IllegalStateException`. |
+| How it writes the reasons and the two values of `source` | As the constants of two enums, named as the specification names them but in upper case: `Reason` has `BREAKER_OPEN`, `INVALID_INPUT`, `DEADLINE`, `TIMEOUT`, `CONNECTION`, and `RESPONSE`, and `Source` has `LEXQ` and `FALLBACK`. When a version of the specification adds a reason, the client adds a constant to `Reason`, and [CONTRIBUTING.md](CONTRIBUTING.md) counts that as a breaking change. |
+| The exact decimal type, and how to compare two numbers by value | `java.math.BigDecimal`, which keeps the digits and the scale, so `1.50` stays `1.50`. Compare two numbers with `compareTo`: `equals` is false between `20` and `20.0`, and so is `==` in Kotlin, which calls `equals`. `totalProcessingTimeMs` is a `long`. |
+| The text it writes for a number that carries no text of its own | A `BigDecimal` goes out as its `toString()` writes it, so `0.0000001` goes out as `1E-7`, and `1E+400` keeps its exponent. A `BigInteger`, `long`, `int`, `short`, or `byte` goes out as its decimal digits. For a `double` or a `float`, the client starts from the text that `Double.toString` or `Float.toString` writes in JDK 19 and later, drops the trailing zeros after its decimal point and before any `E`, and writes the resulting number as `BigDecimal.toString()` does. So `0.1` goes out as `0.1`, not as the 55 decimal places of `new BigDecimal(0.1)`; `100.0` goes out as `100`; `0.0001`, which `Double.toString` writes as `1.0E-4`, goes out as `0.0001`; `0.0000001` goes out as `1E-7`; and `10000000.0`, which `Double.toString` writes as `1.0E7`, goes out as `1E+7`. `Double.toString` and `Float.toString` changed in JDK 19, and earlier JDKs write some values differently, such as `2e23` as `1.9999999999999998E23` instead of `2.0E23`. On those JDKs the client does not call them but computes the text that JDK 19 and later write, so every Java version it supports sends the same text for the same value, and `2e23` goes out as `2E+23`. |
+| The cancellation mechanism | Interrupting the thread that waits in the blocking form, or canceling the future of the asynchronous form. The client stops the attempt in flight. An interrupted call leaves the thread's interrupt status set and throws `CancellationException`, the exception `join()` throws for a canceled `CompletableFuture`. |
+| Where it refuses to start | The constructor throws on Android, where `java.vm.name` is `Dalvik`. A desktop app's JVM looks like a server's, so the client starts there, and the documentation says to keep the client out of desktop apps. |
+| How a field LexQ adds later reaches the caller | The result keeps every field of `data` in a map, nested objects and lists included, so a field LexQ adds, even one inside a trace, reaches the caller before the client's types name it. When the types name such a field in a later release, its type accepts `null`, so it is never a primitive such as `long` or `boolean`. A field that holds a LexQ enum value, such as `status` in `decisionTraces`, is a `String`, so `null` and a value LexQ adds later both arrive. |
+| Which collections it refuses because it cannot rely on their order | Every `Collection` that is not a `List`, such as a `Set` or the `values()` of a map. The `Collection` interface promises no order, and the client accepts only a `List`, so it refuses even a `TreeSet` or a `LinkedHashSet`, whose classes define one. `Set.of` and the `values()` of `Map.of` can iterate in a different order each time the JVM starts. |
+| Which key names could change how its own objects behave or which types its parser creates, and how it keeps them ordinary keys | `@class`, `@type`, and every other key stay ordinary keys. The client's JSON reader creates only maps, lists, strings, `BigDecimal` values, booleans, and `null`, and never picks a class from a key. |
+| How one client is shared across concurrent calls | A service creates one client and shares it. The client is safe to call from many threads at once, and those calls share its breaker. |
+| Any rule that only its language has | An attempt's timeout covers the whole response, but a timeout set with `HttpRequest.Builder.timeout()` in the JDK's HTTP client can stop counting once the headers arrive, so that setting cannot be the attempt timeout on its own. The JDK's HTTP client neither throws on an error status nor follows a redirect by default. One built with `Redirect.NORMAL` sends `x-api-key` to the new address, even on another host, and after a `307` or `308` it sends the body too, so the client keeps the default policy, `Redirect.NEVER`. `URLEncoder.encode` writes a space as `+`, so it cannot encode the group ID. A group ID that holds an unpaired surrogate is a programming error, because a URL cannot carry it: `String.getBytes(StandardCharsets.UTF_8)` silently writes `?` in its place, and `URLEncoder.encode` writes `%3F`. |

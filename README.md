@@ -12,12 +12,22 @@ returns the decision. This library will make that call, with four safeguards:
 - Every call has a deadline that covers its retries.
 - An attempt that times out or hits a temporary error is sent again with the same
   `Idempotency-Key`. If LexQ has already finished an earlier attempt successfully, it
-  returns that result instead of running the decision again.
+  returns that result instead of running the decision again. In an organization that
+  uses [Fail-open](https://docs.lexq.io/glossary#billing-and-infrastructure), LexQ keeps
+  running calls when an outage stops it from checking whether another request holds the
+  key. A retry that arrives then, while an earlier attempt is still running or after
+  that attempt failed, runs the decision again and is billed again.
 - A circuit breaker stops calling LexQ for a while when calls keep failing.
 - Every call requires a fallback: the decision your service uses when the call fails.
 
-[CONTRACT.md](CONTRACT.md) spells out each safeguard and how the library reads LexQ's
-responses.
+[spec/SPEC.md](spec/SPEC.md) spells out each safeguard and how the library reads
+LexQ's responses. It is an unchanged copy of one version of the LexQ SDK specification.
+[CONTRACT.md](CONTRACT.md) says which version that is, where the library does not yet do
+what that version says, and how the specification maps onto Java.
+
+To check that the copies in `spec/` match the SHA-256 values in `spec/spec.lock`, and
+that `CONTRACT.md` names the version the lock records, run `java scripts/CheckSpec.java`
+from the repository root.
 
 Run the client on a server. It will refuse to start on Android, where the API key would
 reach every user who installs the app. Keep it out of a desktop app for the same reason.
@@ -30,9 +40,10 @@ covers what to do when a call fails.
 ## Maintenance
 
 I'm Sanghyun Park, and I maintain this library. I write most of it with AI coding
-tools, mainly Claude Code. I decide each change, read every commit and diff before it
-is pushed, and merge every pull request myself. The rules for changing the library
-are in [CONTRIBUTING.md](CONTRIBUTING.md).
+tools, mainly Claude Code. I decide each change, read every commit and diff before I
+push it, and merge every pull request myself. Dependabot pushes its own branches to
+propose new versions of the CI actions, and I read those changes before I merge them.
+The rules for changing the library are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 

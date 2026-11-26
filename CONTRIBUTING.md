@@ -2,9 +2,9 @@
 
 These rules cover every change to this repository. What the library must do is in the
 LexQ SDK specification, copied into [spec/SPEC.md](spec/SPEC.md), and how it does that
-in Java is in [CONTRACT.md](CONTRACT.md). So far the repository holds only documents and
-the CI check of the copies in `spec/`: the build, the tests, the release workflow, and the
-generated constants these rules name come in later changes.
+in Java is in [CONTRACT.md](CONTRACT.md). So far the repository holds the build,
+`Contract.java` generated from `spec/values.json`, and the CI checks. The code that calls
+LexQ, its contract tests, and the release workflow come in later changes.
 
 - Unit and contract tests use a fake server. A change to how a call is sent or read
   also gets one real call against a live tenant before it lands. Outputs pasted into
@@ -26,9 +26,10 @@ generated constants these rules name come in later changes.
   the lock's, names the lock's more than once, or leaves it out. Any string written like
   `v1.2.3` counts as a version, even one meant as a tag of this library.
 - `spec/values.json` holds the LexQ enums and constants the specification uses, the
-  error codes it names, and the defaults. The client's constants for these values are
-  generated from it, and the tests read it and fail when the code or the documentation
-  states a different value.
+  error codes it names, and the defaults. From it, `scripts/GenerateContract.java` writes
+  every default and the LexQ constants the script lists into
+  `src/main/java/io/lexq/sdk/Contract.java`, and the tests fail when that file is not what
+  the script writes.
 - Add a runtime dependency only with a reason in the pull request. Every dependency
   ships into every customer's server. A customer's build also resolves each library to
   a single version, so the version their application already uses can replace the one

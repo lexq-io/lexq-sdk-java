@@ -8,9 +8,9 @@ specification onto Java.
 
 ## Not followed yet
 
-The client has no code yet, so it does none of what the specification says.
+The client cannot call LexQ yet, so it does none of what the specification says.
 [Language mapping](#language-mapping) says how it will follow the specification. Once it
-has code, it will still fall short in one place:
+can, it will still fall short in one place:
 
 - **Where the client starts** ([Sending a request](spec/SPEC.md#sending-a-request)): the
   client recognizes a mobile app only by `java.vm.name`, which is `Dalvik` on Android. In

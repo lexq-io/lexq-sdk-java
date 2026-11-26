@@ -1,5 +1,6 @@
-# Actions are pinned to commit SHAs, so none changes on its own. Dependabot proposes
-# new versions as pull requests.
+# Actions are pinned to commit SHAs, and Maven plugins and libraries to exact versions in
+# pom.xml, so none of them changes on its own. Dependabot proposes new versions as pull
+# requests.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -15,4 +16,16 @@ updates:
     # Minor and patch updates share one pull request; each major update opens its own.
     groups:
       actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+    groups:
+      maven:
         update-types: [minor, patch]

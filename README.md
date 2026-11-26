@@ -29,6 +29,14 @@ To check that the copies in `spec/` match the SHA-256 values in `spec/spec.lock`
 that `CONTRACT.md` names the version the lock records, run `java scripts/CheckSpec.java`
 from the repository root.
 
+To build the library and run its tests, run `./mvnw verify` (`.\mvnw.cmd verify` on
+Windows) from the repository root with Java 17 or later. The first time it runs, the
+wrapper downloads the Maven version that `.mvn/wrapper/maven-wrapper.properties` pins and
+checks its SHA-256. `./mvnw` needs `unzip`: without it, the wrapper downloads a `.tar.gz`
+archive, which fails that check. To write `src/main/java/io/lexq/sdk/Contract.java`
+again from `spec/values.json`, run `java scripts/GenerateContract.java` from the
+repository root.
+
 Run the client on a server. It will refuse to start on Android, where the API key would
 reach every user who installs the app. Keep it out of a desktop app for the same reason.
 
@@ -42,7 +50,8 @@ covers what to do when a call fails.
 I'm Sanghyun Park, and I maintain this library. I write most of it with AI coding
 tools, mainly Claude Code. I decide each change, read every commit and diff before I
 push it, and merge every pull request myself. Dependabot pushes its own branches to
-propose new versions of the CI actions, and I read those changes before I merge them.
+propose new versions of the CI actions and of the Maven plugins and libraries, and I read
+those changes before I merge them.
 The rules for changing the library are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security

@@ -26,11 +26,35 @@ jobs:
 
       - run: java scripts/CheckSpec.java
 
+  build:
+    name: Build on Java ${{ matrix.java }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 17 is the lowest supported Java version, as README.md and pom.xml say.
+        java: [17, 21, 25]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      # The wrapper checks the SHA-256 of the Maven it downloads. --strict-checksums in
+      # .mvn/maven.config fails the build when a downloaded plugin or library does not
+      # match the checksum its repository publishes.
+      - run: ./mvnw -B -ntp verify
+
   # The check for the main branch's ruleset to require. It passes only when every job
   # in needs passed, so jobs can be added to needs without editing the ruleset.
   tests-passed:
     name: Tests passed
-    needs: spec
+    needs: [spec, build]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5

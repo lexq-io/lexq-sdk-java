@@ -3,12 +3,14 @@
 These rules cover every change to this repository. What the library must do is in the
 LexQ SDK specification, copied into [spec/SPEC.md](spec/SPEC.md), and how it does that
 in Java is in [CONTRACT.md](CONTRACT.md). So far the repository holds the build,
-`Contract.java` generated from `spec/values.json`, and the CI checks. The code that calls
-LexQ, its contract tests, and the release workflow come in later changes.
+`Contract.java` generated from `spec/values.json`, the code that writes request bodies and
+reads responses as JSON, and the CI checks. The code that calls LexQ, its contract tests,
+and the release workflow come in later changes.
 
-- Unit and contract tests use a fake server. A change to how a call is sent or read
-  also gets one real call against a live tenant before it lands. Outputs pasted into
-  the README or comments come from a real run, and the pull request says which run.
+- No test calls LexQ, and a test that needs a server uses a fake one. A change to how a
+  call is sent or read also gets one real call against a live tenant before it lands.
+  Outputs pasted into the README or comments come from a real run, and the pull request
+  says which run.
 - Sanitize pasted output. API keys, tenant IDs, user IDs, and personal data become
   placeholders. Apart from those, decision payloads stay exactly as they came back.
 - Response types list only the fields LexQ sends, taken from the Execution API

@@ -26,7 +26,8 @@ class GeneratedContractTest {
                     .start();
             if (!process.waitFor(2, TimeUnit.MINUTES)) {
                 process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
-                fail("scripts/GenerateContract.java --check did not finish in 2 minutes");
+                fail("scripts/GenerateContract.java --check did not finish in 2 minutes. Its output so far:\n"
+                        + read(output));
             }
             assertEquals(0, process.exitValue(), () -> read(output));
         } finally {

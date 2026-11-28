@@ -145,7 +145,8 @@ public final class GenerateContract {
         try {
             document = new Json(text).document();
         } catch (IllegalArgumentException e) {
-            fail(VALUES + " is not valid JSON: " + e.getMessage(), List.of());
+            // The reader also refuses some valid JSON, such as a repeated member or nesting past MAX_DEPTH.
+            fail(VALUES + " could not be read: " + e.getMessage(), List.of());
         }
         Map<String, Object> top = object(document);
         Map<String, Object> constants = object(top.get("constants"));
@@ -170,7 +171,8 @@ public final class GenerateContract {
             while (codes.find()) {
                 if (!statuses.containsKey(codes.group(1))) {
                     problems.add("error code " + codes.group(1) + ", which the description of " + constant.name()
-                            + " names, is missing or its status is not an integer");
+                            + " names, is missing from errorCodes, or its httpStatus is not a positive integer"
+                            + " no larger than " + Integer.MAX_VALUE);
                 }
             }
         }
